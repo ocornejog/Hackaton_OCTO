@@ -74,10 +74,31 @@ def is_post_relevant_for_country(title, country):
     return response.choices[0].message.content.strip().lower() == 'yes'
 
 def analyze_sentiment_openai(text, country):
-    prompt = f"""Analyze the sentiment towards {country} in this text. Consider both explicit and implicit references.
-    Text: "{text}"
-    Rate the sentiment on a scale from -1 (very negative) to 1 (very positive).
-    Return only the numerical score."""
+    prompt = f"""I'm giving you a social media post. This post is {text}. For the country {country}
+mentioned in the post, evaluate if the post gives an opinion on how enjoyable this country is
+and determine the sentiment of the poster toward that country as a number between -1.000 and 1.000. -1.000 is negative,
+1.000 is positive and 0.000 is neutral. If the post doesn't give an opinion on a country or either
+doesn't mention any country or alternatively just mention countries without giving an opinion on them, then their opinion 
+will be considered neutral and equal to 0.000. Write only the numerical value itself"""
+    
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+    )
+    try:
+        return float(response.choices[0].message.content.strip())
+    except ValueError:
+        return 0.0
+
+def analyze_security_sentiment_openai(text, country):
+    prompt = f"""I'm giving you a social media post. This post is {text}. For the country {country}
+mentioned in the post, evaluate if the post gives an opinion on how safe this country is
+and determine the sentiment of the poster toward the safeness of that country as a number between -1.000 and 1.000. 
+-1.000 is negative, 1.000 is positive and 0.000 is neutral. If the post doesn't give an opinion on the
+safeness of a country or either doesn't mention any country or alternatively just mention countries 
+without giving an opinion on them, then their opinion will be considered neutral and equal to 0.000.
+Write only the numerical value itself"""
     
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
@@ -120,7 +141,7 @@ def calculate_satisfaction_score(upvotes, downvotes, comments_sentiment):
     # Weight: 70% votes, 30% comments
     return (0.7 * (vote_ratio * 2 - 1)) + (0.3 * avg_comment_sentiment)
 
-def collect_reddit_data(subreddit_name, limit=100000):
+def collect_reddit_data(subreddit_name, limit=500):
     with st.spinner('Analyse des posts Reddit en cours...'):
         try:
             subreddit = reddit.subreddit(subreddit_name)
@@ -131,7 +152,7 @@ def collect_reddit_data(subreddit_name, limit=100000):
             progress_bar = st.progress(0)
             
             
-            posts = list(subreddit.hot(limit=min(limit, 1000)))
+            posts = list(subreddit.hot(limit=min(limit, 500)))
             if not posts:
                 st.warning("Aucun post trouvé dans ce subreddit")
                 return {}
@@ -156,6 +177,7 @@ def collect_reddit_data(subreddit_name, limit=100000):
                 if country not in country_data:
                     country_data[country] = {
                         'satisfaction_sum': 0,
+                        'security_sum': 0,
                         'post_count': 0,
                         'mentions_count': 0,
                         'total_upvotes': 0,
@@ -164,11 +186,13 @@ def collect_reddit_data(subreddit_name, limit=100000):
                         'popularity_ratio': 0
                     }
                 
-                # Calculate sentiment using OpenAI
-                sentiment = analyze_sentiment_openai(post_text, country)
+                # Calculate sentiments using OpenAI
+                satisfaction_sentiment = analyze_sentiment_openai(post_text, country)
+                security_sentiment = analyze_security_sentiment_openai(post_text, country)
                 
                 # Update country statistics
-                country_data[country]['satisfaction_sum'] += sentiment
+                country_data[country]['satisfaction_sum'] += satisfaction_sentiment
+                country_data[country]['security_sum'] += security_sentiment
                 country_data[country]['post_count'] += 1
                 country_data[country]['mentions_count'] += 1
                 country_data[country]['total_upvotes'] += post.ups
@@ -208,6 +232,7 @@ def create_interactive_visualizations(country_data):
                 'country': country,
                 'country_code': country_code,
                 'avg_satisfaction': avg_satisfaction,
+                'avg_security': data['security_sum'] / data['post_count'] if data['post_count'] > 0 else 0,
                 'post_count': data['post_count'],
                 'popularity_ratio': data['popularity_ratio'],
                 'total_mentions': data['mentions_count'],
@@ -222,7 +247,7 @@ def create_interactive_visualizations(country_data):
     df = pd.DataFrame(df_data)
     
     # Create tabs for different visualizations
-    tab1, tab2, tab3, tab4 = st.tabs(["World Map", "Country Rankings", "Engagement Analysis", "Correlation Analysis"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["World Map", "Country Rankings", "Engagement Analysis", "Correlation Analysis", "Security Analysis"])
     
     with tab1:
         st.subheader("Distribution global des sentiments")
@@ -300,6 +325,29 @@ def create_interactive_visualizations(country_data):
         )
         st.plotly_chart(fig_corr, use_container_width=True)
     
+    with tab5:
+        st.subheader("Security Analysis")
+        
+        # Security World Map
+        fig_security_map = px.choropleth(df,
+                           locations='country_code',
+                           color='avg_security',
+                           hover_data=['post_count', 'popularity_ratio', 'total_mentions'],
+                           color_continuous_scale='RdYlGn',
+                           title='Country Security Perception Analysis from Reddit')
+        st.plotly_chart(fig_security_map, use_container_width=True)
+        
+        # Top 10 countries by security perception
+        st.write("Top 10 Countries by Security Perception")
+        fig_security = px.bar(
+            df.nlargest(10, 'avg_security'),
+            x='country',
+            y='avg_security',
+            color='avg_security',
+            color_continuous_scale='RdYlGn'
+        )
+        st.plotly_chart(fig_security, use_container_width=True)
+    
     return df
 
 def main():
@@ -308,7 +356,7 @@ def main():
     
     with st.sidebar:
         subreddit_name = st.text_input("Nom du subreddit:", value="travel")
-        post_limit = st.slider("Nombre de posts à analyser:", 10, 100000, 100)
+        post_limit = st.slider("Nombre de posts à analyser:", 10, 500, 100)
         
     if st.sidebar.button("Analyser"):
         country_data = collect_reddit_data(subreddit_name, limit=post_limit)
