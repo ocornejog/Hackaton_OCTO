@@ -3,8 +3,14 @@ from dotenv import load_dotenv
 import praw
 from textblob import TextBlob
 import pycountry
+
 import nltk
+nltk.download('punkt_tab')
+
 from nltk.tokenize import word_tokenize
+
+import plotly.express as px
+import pandas
 
 load_dotenv()
 
@@ -89,3 +95,49 @@ for post in data:
         print(f"\tSentiment: {comment['sentiment']:.2f}")
         print(f"\tText: {comment['text'][:100]}...")  # Show first 100 chars
     print("-" * 80)
+
+
+
+
+
+
+
+
+
+#Example of how to use OpenAI
+import openai
+import os
+from dotenv import load_dotenv, find_dotenv
+_ = load_dotenv(find_dotenv())
+
+openai.api_key = os.environ['OPENAI_API_KEY']
+
+llm_model = "gpt-3.5-turbo"
+def get_response_from_model(prompt):
+    messages = [{"role": "user", "content": prompt}]
+    response = openai.chat.completions.create(
+        model=llm_model,
+        messages=messages,
+        temperature=0
+    )
+    return response.choices[0].message.content
+    
+prompt = """
+I'm giving you a list of posts. These posts are {list_posts}. For each post and each country
+mentioned in the post, evaluate if the post gives an opinion on this country
+and determine the sentiment of the poster toward that country. If the post doesn't give an opinion on a country and either
+doesn't mention any country or alternatively just mention countries without giving an opinion on them, then their opinion will be
+considered neutral. Additionally, specify the intensity of the sentiment as a decimal number between 0.000 and 1.000.
+text : the full text of the post
+country : the country concerned by the sentiment
+sentiment : negative, postive or neutral
+intensity : the intensity of the sentiment
+reasoning : the reasoning behind the sentiment
+Format the output as list of JSON with the following keys and without \n: 
+text :
+country :
+sentiment :
+intensity :
+reasoning :
+"""
+print(get_response_from_model(prompt.format(list_posts=["I love Italy and Spain", "I kind of dislike the UK", "The population of France is 10000000"])))
