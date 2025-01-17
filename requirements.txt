@@ -1,0 +1,9 @@
+openai
+python-dotenv
+praw
+pycountry
+pandas
+plotly
+nltk
+streamlit
+textblob
